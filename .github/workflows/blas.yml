@@ -87,11 +87,10 @@ jobs:
             -DNOFORTRAN=1 ^
             -DBUILD_WITHOUT_LAPACK=1 ^
             -DBUILD_SHARED_LIBS=OFF ^
-            -DCMAKE_INSTALL_PREFIX=install
+            -DCMAKE_INSTALL_PREFIX=blas
 
           :: Build and Install
-          cmake --build . --config Release
-          cmake --install . --prefix ./blas
+          cmake --build build --target install
 
       - name: Tar
         run: |
@@ -255,8 +254,8 @@ jobs:
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.proc }} \
             -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_C_FLAGS="--target=${{ matrix.triple }} -fuse-ld=lld ${{ matrix.flags }}" \
-            -DCMAKE_CXX_FLAGS="--target=${{ matrix.triple }} -fuse-ld=lld ${{ matrix.flags }}" \
+            -DCMAKE_C_FLAGS="--target=${{ matrix.triple }} -fuse-ld=lld --sysroot=/usr/${{ matrix.triple }} ${{ matrix.flags }}" \
+            -DCMAKE_CXX_FLAGS="--target=${{ matrix.triple }} -fuse-ld=lld --sysroot=/usr/${{ matrix.triple }} ${{ matrix.flags }}" \
             -DCMAKE_CXX_COMPILER=clang++ \
             -DTARGET=${{ matrix.arch }} \
             -DNOFORTRAN=1 \
