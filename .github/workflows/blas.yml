@@ -105,8 +105,18 @@ jobs:
             -DCMAKE_SYSTEM_NAME=Windows ^
             -DCMAKE_INSTALL_PREFIX=C:/opt
 
-          :: Build and Install
+      - name: Build OpenBLAS
+        shell: cmd
+        working-directory: blas
+        run: |
+          cd build
           ninja -j16
+
+      - name: Install OpenBLAS
+        shell: cmd
+        working-directory: blas
+        run: |
+          cd build
           cmake --install .
 
       - name: Tar
