@@ -1,0 +1,307 @@
+name: Build OpenBLAS
+
+on:
+  # push:
+  #   paths:
+  #     - .github/workflows/blas.yml
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+    inputs:
+      blasversion:
+        type: string
+        default: v0.3.32
+        description: Enter the OpenBLAS version
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  blasversion: ${{ github.event.inputs.blasversion || 'v0.3.32' }}
+
+jobs:
+  windows:
+    name: Build OpenBLAS (${{ matrix.triple }})
+
+    # Ironically, windows 11 Arm runs and builds times faster than windows-latest
+    runs-on: windows-11-arm
+
+    strategy:
+      matrix:
+        include:
+          - arch: ARMV8
+            triple: aarch64-pc-windows-msvc
+            vsmode: arm64
+            proc: arm64
+
+          - arch: CORE2
+            triple: x86_64-pc-windows-msvc
+            vsmode: arm64_x64
+            proc: x86_64
+
+          - arch: P2
+            triple: i686-pc-windows-msvc
+            vsmode: arm64_x86
+            proc: i686
+
+    steps:
+      - name: Git Large Path
+        run: git config --global core.longpaths true
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Checkout OpenBLAS
+        uses: actions/checkout@v6
+        with:
+          repository: OpenMathLib/OpenBLAS
+          path: blas
+          fetch-depth: 1
+          ref: ${{ env.blasversion }}
+
+      - name: Install Ninja
+        uses: llvm/actions/install-ninja@89a8cf80982d830faab019237860b344a6390c30
+
+      - name: Build BLAS
+        working-directory: blas
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do (
+            set "VS_PATH=%%i"
+          )
+
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vsmode }}
+          
+          :: Build
+          cmake -G Ninja -B build ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_SYSTEM_NAME=Windows ^
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.proc }} ^
+            -DTARGET=${{ matrix.arch }} ^
+            -DDYNAMIC_ARCH=ON ^
+            -DNOFORTRAN=1 ^
+            -DBUILD_WITHOUT_LAPACK=1 ^
+            -DBUILD_SHARED_LIBS=OFF ^
+            -DCMAKE_INSTALL_PREFIX=install
+
+          :: Build and Install
+          cmake --build build --target install
+
+      - name: Tar
+        run: |
+          tar -czvf blas-static-${{ matrix.triple }}.tar.gz `
+            -C blas/install lib include
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: blas-static-${{ matrix.triple }}
+          path: blas-static-${{ matrix.triple }}.tar.gz
+          archive: true
+
+
+  macos:
+    name: Build OpenBLAS (${{ matrix.triple }})
+
+    strategy:
+      matrix:
+        include:
+          # MacOS
+          - arch: ARMV8
+            proc: arm64
+            os: macos-26
+            triple: arm64-apple-darwin
+
+          - arch: CORE2
+            proc: x86_64
+            os: macos-26-intel
+            triple: x86_64-apple-darwin
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Checkout OpenBLAS
+        uses: actions/checkout@v6
+        with:
+          repository: OpenMathLib/OpenBLAS
+          path: blas
+          fetch-depth: 1
+          ref: ${{ env.blasversion }}
+
+      - name: Build Blas
+        working-directory: blas
+        run: |
+          # Build
+          cmake . -G Ninja -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Darwin \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.proc }} \
+            -DTARGET=${{ matrix.arch }} \
+            -DNOFORTRAN=1 \
+            -DBUILD_WITHOUT_LAPACK=1 \
+            -DHOSTCC=clang \
+            -DCMAKE_INSTALL_PREFIX=install \
+            -DBUILD_SHARED_LIBS=OFF
+
+          cmake --build build --target install
+
+      - name: Tar
+        run: |
+          tar -czvf blas-static-${{ matrix.triple }}.tar.gz \
+            -C blas/install lib include
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: blas-static-${{ matrix.triple }}
+          path: blas-static-${{ matrix.triple }}.tar.gz
+          archive: true
+
+
+  linux:
+    name: Build OpenBLAS (${{ matrix.triple }})
+
+    strategy:
+      matrix:
+        include:
+          # Arm64
+          - arch: ARMV8
+            install: clang libc6-dev-arm64-cross
+            triple: aarch64-linux-gnu
+            proc: aarch64
+
+          # x86_64 (x64)
+          - arch: CORE2
+            install: clang
+            triple: x86_64-linux-gnu
+            proc: x86_64
+
+          # i686 (x86 32-bit)
+          - arch: P2
+            install: clang gcc-multilib g++-multilib
+            triple: i686-linux-gnu
+            proc: i686
+            flags: -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32"
+
+          # LoongArch64 (GCC 13)
+          - arch: LOONGSONGENERIC
+            install: clang libc6-dev-loong64-cross
+            triple: loongarch64-linux-gnu
+            proc: loongarch64
+
+          # ARMv7 (HF)
+          - arch: ARMV7
+            install: clang libc6-dev-armhf-cross
+            triple: arm-linux-gnueabihf
+            proc: armv7l
+          
+          # RISCV64
+          - arch: RISCV64_GENERIC
+            install: clang libc6-dev-riscv64-cross
+            triple: riscv64-linux-gnu
+            proc: riscv64
+
+          # PowerPC
+          - arch: POWER8
+            install: clang libc6-dev-ppc64el-cross
+            triple: powerpc64le-linux-gnu
+            proc: ppc64le
+
+          # MIPS64
+          - arch: MIPS24K
+            install: clang libc6-dev-mips64el-cross
+            triple: mips64el-linux-gnu
+            proc: mips64el
+
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Checkout OpenBLAS
+        uses: actions/checkout@v6
+        with:
+          repository: OpenMathLib/OpenBLAS
+          path: blas
+          fetch-depth: 1
+          ref: ${{ env.blasversion }}
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get install -y lld ${{ matrix.install }}
+
+      - name: Build OpenBLAS
+        working-directory: blas
+        run: |
+          export CC=clang
+          export CXX=clang++
+
+          # Cross Build
+          cmake . -G Ninja -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.proc }} \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_C_FLAGS="--target=${{ matrix.triple }} ${{ matrix.flags }}" \
+            -DCMAKE_CXX_FLAGS="--target=${{ matrix.triple }} ${{ matrix.flags }}" \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DTARGET=${{ matrix.arch }} \
+            -DNOFORTRAN=1 \
+            -DHOSTCC=gcc \
+            -DCMAKE_INSTALL_PREFIX=install \
+            -DDYNAMIC_ARCH=ON \
+            -DBUILD_WITHOUT_LAPACK=1 \
+            -DBUILD_SHARED_LIBS=OFF
+
+          cmake --build build --target install
+
+      - name: Tar
+        run: |
+          tar -czvf blas-static-${{ matrix.triple }}.tar.gz \
+            -C blas/install lib include
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: blas-static-${{ matrix.triple }}
+          path: blas-static-${{ matrix.triple }}.tar.gz
+          archive: true
+
+  release-blas:
+    name: Release OpenBLAS
+
+    runs-on: ubuntu-latest
+
+    needs: [windows, macos, linux]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download all artifacts
+        run: gh run download ${{ github.run_id }} --dir release
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Generate timestamp
+        id: time
+        run: echo "time=$(date +'%Y-%m-%d-%H-%M')" >> $GITHUB_OUTPUT
+
+      - name: Release Artifacts
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.blasversion }}-${{ steps.time.outputs.time }}
+          body: |
+            # OpenBLAS Build (${{ env.blasversion }})
+            Uploaded at : ${{ steps.time.outputs.time }}
+
+            This is an autogenerated build of OpenBLAS meant for static compilation of OpenBLAS to be used
+            in SaVM Projects.
+          files: release/**/*.tar.gz
