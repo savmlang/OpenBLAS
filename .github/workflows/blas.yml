@@ -1,9 +1,9 @@
 name: Build OpenBLAS
 
 on:
-  # push:
-  #   paths:
-  #     - .github/workflows/blas.yml
+  push:
+    paths:
+      - .github/workflows/blas.yml
   schedule:
     - cron: '0 0 1 * *'
   workflow_dispatch:
@@ -74,8 +74,11 @@ jobs:
 
           call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vsmode }}
           
+          md build
+          cd build
+
           :: Build
-          cmake -G Ninja -B build ^
+          cmake .. -G Ninja ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_SYSTEM_NAME=Windows ^
             -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.proc }} ^
@@ -87,12 +90,13 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=install
 
           :: Build and Install
-          cmake --build build --target install
+          cmake --build . --config Release
+          cmake --install . --prefix ./blas
 
       - name: Tar
         run: |
           tar -czvf blas-static-${{ matrix.triple }}.tar.gz `
-            -C blas/install lib include
+            -C blas/install/blas lib include
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
@@ -146,7 +150,9 @@ jobs:
             -DBUILD_WITHOUT_LAPACK=1 \
             -DHOSTCC=clang \
             -DCMAKE_INSTALL_PREFIX=install \
-            -DBUILD_SHARED_LIBS=OFF
+            -DBUILD_SHARED_LIBS=OFF \
+            -DNO_UTEST=1 \
+            -DNO_CTEST=1
 
           cmake --build build --target install
 
@@ -249,8 +255,8 @@ jobs:
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.proc }} \
             -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_C_FLAGS="--target=${{ matrix.triple }} ${{ matrix.flags }}" \
-            -DCMAKE_CXX_FLAGS="--target=${{ matrix.triple }} ${{ matrix.flags }}" \
+            -DCMAKE_C_FLAGS="--target=${{ matrix.triple }} -fuse-ld=lld ${{ matrix.flags }}" \
+            -DCMAKE_CXX_FLAGS="--target=${{ matrix.triple }} -fuse-ld=lld ${{ matrix.flags }}" \
             -DCMAKE_CXX_COMPILER=clang++ \
             -DTARGET=${{ matrix.arch }} \
             -DNOFORTRAN=1 \
@@ -258,7 +264,9 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=install \
             -DDYNAMIC_ARCH=ON \
             -DBUILD_WITHOUT_LAPACK=1 \
-            -DBUILD_SHARED_LIBS=OFF
+            -DBUILD_SHARED_LIBS=OFF \
+            -DNO_UTEST=1 \
+            -DNO_CTEST=1
 
           cmake --build build --target install
 
